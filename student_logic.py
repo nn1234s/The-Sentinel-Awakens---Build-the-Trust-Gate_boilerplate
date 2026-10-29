@@ -86,8 +86,64 @@ def get_sentinel_mood(trust: int) -> str:
 
 
 def process_player_message(msg: str):
-    pass
+    s = st.session_state
+    if not s.player_name.strip():
+        st.toast("Enter your traveler name first.", icon="⭐")
+        return
+    if not msg.strip():
+        return
+    recent = [m.lower().strip() for m in s.player_messages[-6:]]
+    if recent.count(msg.lower().strip()) >= 2:
+        st.toast("The sentinel noticed your repeating your self",icon="🤨")
+        _append_log("YOU", msg)
+        _append_log("SENTINEL", random.choice(REPEAT_REPLIES))
+        s.player_messages.append(msg)
+        s.messages_sent += 1
+        return
+    delta = analyze_player_tone(msg, s.streak, s.player_messages)
+    s.trust_score =  max(0, min(MAX_TRUST, s.trust_score + delta))
+    s.sentinel_mood = get_sentinel_mood(s.trust_score)
+    s.streak = s.streak + 1 if delta > 0 else 0
+    _append_log("YOU", msg)
+    reply = _ask_sentinel_ai(s.player_name, msg, s.trust_score, s.sentinel_mood)
+    _append_log("SENTINEL", reply)
+    s.player_messages.append(msg)
+    s.latest_clue = "the sentinel studies your tone."
+    s.messages_sent += 1
+    if s.trust_score <= BANISH_THRESHOLD and delta < 0:
+        s.banished = True
+
 
 
 def process_riddle_answer(answer: str):
-    pass
+    s = st.session.state
+    if s.riddle_solved:
+        st.toast("Logic lock already solved", icon="ℹ️")
+        return
+    riddle = s.riddle
+    if riddle["answer"].lower() in answer.lower().strip():
+        s.riddle_solved = True
+        s.trust_score = min(MAX_TRUST, s.trust_score + 35)
+        s.sentinel_mood = get_sentinel_mood(s.trust_score)
+        s.streak += 1
+        _append_log("YOU", f"Riddle: {answer}")
+        _append_log("SENTINEL", random.choice([...correct replies...]))
+        s.latest_clue = "The runes brighten - a thin line of light appears in the gate"
+        st.toast("correct! the lock flashes open..", icon="🛫")
+    else:
+        s.trust_score = max(0, s.trust_score - 5)
+        s.sentinel_mood = get_sentinel_mood(s.trust_score)
+        s.streak = 0
+        _append_log("YOU", f"Riddle: {answer}")
+        _append_log("SENTINEL", random.choice([...wrong replies...]))
+        s.latest_clue = f"Hint: {riddle['hint']}" 
+        st.toast("Incorrect - the seal holds.", icon="X")
+def fallback_sentinel(player_name: str, message: str, mood: str) -> str:
+    if any(w in message.lower() for w in RUDE_HINTS):
+        return random.choice([
+            "watch yourself ive turned way far greater then u for less",
+            "that kind of talk doesnt open doors here. it closes then.",
+            "careful. the vault remembers every word spoken at its gate",
+        ]
+        return random.choice(SENTINEL_FALLBACKS.get(mood, SENTINEL_FALLBACKS["SUSPICIOUS"])))           
+       
