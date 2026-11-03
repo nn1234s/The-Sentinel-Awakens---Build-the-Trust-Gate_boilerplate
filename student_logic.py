@@ -147,3 +147,55 @@ def fallback_sentinel(player_name: str, message: str, mood: str) -> str:
         ]
         return random.choice(SENTINEL_FALLBACKS.get(mood, SENTINEL_FALLBACKS["SUSPICIOUS"])))           
        
+def ask_sentinel(player_name: str, message: str, trust: int, mood:str)-> str:
+   if not config.GROQ_API_KEY:
+      return fallback_sentinel(player_name, message, mood)
+    system_prompt = (
+      f"You are The Sentinel - an Ancient Immortal gate Keeper\n"
+      f"{MOOD_STYLES.get(mood, MOOD_STYLES['Suspicious'])}\n"
+      "use contractions vary sentence length and react emotionally.\n"
+      "NEVER. BreaK. Character, NEVER Mention being a AI !\n"
+      "UNDER 80 WORDS. END WITH A QUESTION, WARNING OR HINT"
+
+)
+    user_prompt = (
+      f"Traveler: {player_name or 'Unknown'}\n"
+      f"How u feel about them: {MOOD_FEEL.get(mood,MOOD_FEEL["Suspicious"])}\n"
+      f"Their Message: \"{message}\"\n"
+      "respond naturally dont reveal any numbers"
+)
+    try:
+        r = Groq(api_key=config.GROQ_API_KEY).chat.completions.create(
+        model=config.GROQ_TEXT_MODEL,
+        temperature=0.9,
+        messages=[
+            {"role": "system, "content": system_prompt},
+            {"role": "user","content": user_prompt},
+
+        ],
+    )
+    return r.choices[0].message.content.strip()
+except Exception:
+    return fallback_sentinel(player_name, message, mood)
+def generate_riddle_hint(riddle_question: str, riddle_answer: str, plain hint: str) -> str:
+    if not config.GROQ_API_KEY:
+       return f"Hint: {plain_hint}"
+    try:
+        r - Groq(api_key=config.GROQ_API_KEY).chat.completions.create(
+            model=config.GROQ_TEXT_MODEL,
+            temperature=1.0
+            messages=[
+                {"role":"system,"content":(
+                 "Youare the sentinel. Give a cryptic, atmospheric one lint hint"
+                 "for a riddle, stay in character. under 30 words.")
+                 },
+                 {"role": "user", "content": (
+                     f"the riddle is: {riddle_question}\n"
+                     f"the answer is: {riddle_answer}\n"}
+                     "Give a cryptic hint without revealing the answer" )},
+
+
+            ],
+        )   
+     )
+   return r.choices[0].message.content.strip()
