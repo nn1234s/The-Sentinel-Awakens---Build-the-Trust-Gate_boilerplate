@@ -1,5 +1,9 @@
+import json
 import random
 import streamlit as st
+
+import config
+from groq import Groq
 
 from constants import (
     MAX_TRUST, BANISH_THRESHOLD, STREAK_BONUS_AT,
@@ -22,6 +26,7 @@ def _ask_sentinel_ai(player_name: str, message: str, trust: int, mood: str) -> s
         "Curious": "You're genuinely interested in them.",
         "Accepting": "You respect them. They've earned it.",
     }
+
     if config.GROQ_API_KEY:
         try:
             from groq import Groq
@@ -52,6 +57,7 @@ def _ask_sentinel_ai(player_name: str, message: str, trust: int, mood: str) -> s
             return r.choices[0].message.content.strip()
         except Exception:
             pass
+
     return random.choice(
         SENTINEL_FALLBACKS.get(mood, SENTINEL_FALLBACKS["Suspicious"])
     )
@@ -262,55 +268,132 @@ def generate_riddle_hint(riddle_question: str, riddle_answer: str, plain_hint: s
 
     except Exception:
         return f"Hint: {plain_hint}"
+
+
 def generate_event_narration(event_title: str, plain_description: str) -> str:
     if not config.GROQ_API_KEY:
         return plain_description
+
     try:
         r = Groq(api_key=config.GROQ_API_KEY).chat.completions.create(
             model=config.GROQ_TEXT_MODEL,
-            temperature=0.95
+            temperature=0.95,
             messages=[
-                {"role": "system","content": (
-                    "You are the sentinel narrating a vault event"
-                    "one dramatic sentence in character under25 words"
-                )},
-                {"role": "user","content":(
-                    f"Event: {event_title}\n"
-                    f"Description: {plain_description}\n"
-                    "Narrate this as The Sentinel in one sentence"
-                )},
-
-
+                {
+                    "role": "system",
+                    "content": (
+                        "You are the sentinel narrating a vault event. "
+                        "Write one dramatic sentence in character, under 25 words."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Event: {event_title}\n"
+                        f"Description: {plain_description}\n"
+                        "Narrate this as The Sentinel in one sentence."
+                    ),
+                },
             ],
         )
         return r.choices[0].message.content.strip()
+
     except Exception:
         return plain_description
-def generate_chamber(idx: int, history:list) -> dict:
+
+
+def generate_chamber(idx: int, history: list) -> dict:
     name = CHAMBER_NAMES[idx % len(CHAMBER_NAMES)]
-cycling:
+
     hist = "|".join(history[-3:]) if history else "None"
     text = call_groq(
-        "Write immersive fantasy mystery chamber description output json title description and clue"
-        f"Chamber {idx+1}. Title: {name}. History: {hist}. Return valid JSON onlyy.", 1.0)
+        "Write immersive fantasy mystery chamber description output JSON title description and clue "
+        f"Chamber {idx+1}. Title: {name}. History: {hist}. Return valid JSON only.",
+        1.0,
+    )
+
+    if text:
+        try:
+            d = json.loads(text)
+            if all(k in d for k in ["title", "description", "clue"]):
+                return d
+        except Exception:
+            pass
+
+    clues = [
+        "A cracked clock face points toward a hidden seam in the wall",
+        "A blue crystal hums whenever the truth is spoken nearby",
+        "A silent spark jumps between metal rings above the doorway.",
+    ]
+
+    return {
+        "title": name,
+        "description": f"{name} opens before you like a forgotten dream. Pale light spills across ancient stone.",
+        "clue": clues[idx % len(clues)],
+    }
+
+
+def generate_relic(chamber_title: str, description: str, count: int) -> dict:
+    text = call_groq(
+        "Create magical relics for a vault adventure. Output JSON: name rarity lore power art_prompt. Rarity common rare epic legendary",
+        f"Relic from {chamber_title}\n{description}\nRelics so far: {count}\nReturn valid JSON only.",
+        1.0,
+    )
 
     if text:
        try:
            d = json.loads(text)
-           if all(k in d for k in ["title", "description", "clue"]):
-               return d
-       except Exception: pass
-       clues = ["A cracked clock face points toward a hidden seam in the wall",
-                "A blue crystal hums whenever the truth is spoken nearby"
-                "A silent spark jumps between metal rings above the doorway."]
-        return {"title":name,
-                "description": f"{name} opens before you like a forgotten dream. Pale light spills across ancient stone.",
-                "clue": clues[idx % len(clues)]}
-def generate_relic(chamber_title: str, description: str, count: int) -> dict:
+           if all(k in d for k in ["name","rarity","lore","power","art_prompt"]): return d
+        except Exception: pass
+    d = RELIC_FALLBACKS[count % len(RELIC_FALLBACKS)].copy() 
+    d["lore"] += f" It resonates with the memory of {chamber_title}." 
+    return d
+def generate_final_ending(player_name: str, relic_names: list, chamber_history: list) -> str:
     text = call_groq(
-        "Create magical relics for a vault adventure. Output JSON: name rarity lore power art_prompt. Rarity common rare epic legenndary",
-        f"Relic from {chamber_title}\n {description}\nRelics so far:{count}\nReturn valid JSON only.", 1.0
-    )
-    if text
+        "Narrate the final ending of a mystery vault game. Triumphant, magical, under 159 words.",
+        f"Player: {player_name}\nRelics: {', '.join(relic_names) or 'None'}\nChambers: {', '.join(chamber_history) or 'None'}")
+    return text or (f"The final seal withdraws as {player_name or 'Traveler'} steps forward, carrying "
+                    f"{', '.join(relic_names) or 'no relics'}. Ancient light spills across the floor. "
+                    f"A voice older than stone declare: Vault A ccess Granted. Your'e journey is now legendary."
+def apply_scenario(sc: dict):
+    s = session_state
+    ch = maybe_generate_current_chamber()
+    if not ch: return
+    change_trust(sc["trust"]); s.streak += 1
+    append_log("YOU", sc["message"])
+    append_log("SENTINEL", ask_sentinel(s.player_name or "Traveler", sc["message"], s.trust_score, s.sentinel_mood))
+    s.latest_clue = sc["effect"]; s.last_action_feedback = sc["effect"]
+    s.scenario_history.append(f"{ch['title']}: {sc['title']}")
+    actions = sum(1 for h in s.scenario_history if h.startswith(ch["title"]))
+    if sc["title"].startswith("➡") or actions >= 2: ()
+        nxt = s.current_chamber + 1; s.current_chamber = nxt; s.last_chamber = None
+        if nxt >= TOTAL_CHAMBERS:
+           s.door_anim = "vault"
+           append_log("SENTINEL", "All chambers have spoken. The forge awaits you now.")
+        else:
+           s.door_anim = "chamber"
+           append_log("SYSTEM", f"Chamber {nxt+1} unlocked - the door opens.")
+    event = maybe_trigger_event()
+    if event:
+        s.last_event = event; change_trust(event["trust_delta"])
+        append_log("SYSTEM", f"EVENT: {event['title']} - {event['description']}")
+    check_achievements()           
+def forge_relic():
+    s = st.session_state
+    if not s.chamber_history:
+       st.toast("No chamber explored yet", icon="⚠️"); return
+    last_title = s.chamber_history[-1]
+    relic = generate_relic(last_title, s.chamber_descriptions.get(last_title, f"Ancient memories of {last_title}."), 
+                           len(s.relic_inventory))   
 
 
+
+
+                    
+
+
+
+
+
+
+    )   
