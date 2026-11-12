@@ -341,20 +341,27 @@ def generate_relic(chamber_title: str, description: str, count: int) -> dict:
     )
 
     if text:
-       try:
-           d = json.loads(text)
-           if all(k in d for k in ["name","rarity","lore","power","art_prompt"]): return d
-        except Exception: pass
-    d = RELIC_FALLBACKS[count % len(RELIC_FALLBACKS)].copy() 
-    d["lore"] += f" It resonates with the memory of {chamber_title}." 
+        try:
+            d = json.loads(text)
+            if all(k in d for k in ["name", "rarity", "lore", "power", "art_prompt"]):
+                return d
+        except Exception:
+            pass
+
+    d = RELIC_FALLBACKS[count % len(RELIC_FALLBACKS)].copy()
+    d["lore"] += f" It resonates with the memory of {chamber_title}."
     return d
+
+
 def generate_final_ending(player_name: str, relic_names: list, chamber_history: list) -> str:
     text = call_groq(
         "Narrate the final ending of a mystery vault game. Triumphant, magical, under 159 words.",
         f"Player: {player_name}\nRelics: {', '.join(relic_names) or 'None'}\nChambers: {', '.join(chamber_history) or 'None'}")
     return text or (f"The final seal withdraws as {player_name or 'Traveler'} steps forward, carrying "
                     f"{', '.join(relic_names) or 'no relics'}. Ancient light spills across the floor. "
-                    f"A voice older than stone declare: Vault A ccess Granted. Your'e journey is now legendary."
+                    f"A voice older than stone declare: Vault A ccess Granted. Your'e journey is now legendary.")
+
+
 def apply_scenario(sc: dict):
     s = session_state
     ch = maybe_generate_current_chamber()
@@ -365,35 +372,41 @@ def apply_scenario(sc: dict):
     s.latest_clue = sc["effect"]; s.last_action_feedback = sc["effect"]
     s.scenario_history.append(f"{ch['title']}: {sc['title']}")
     actions = sum(1 for h in s.scenario_history if h.startswith(ch["title"]))
-    if sc["title"].startswith("➡") or actions >= 2: ()
+    if sc["title"].startswith("➡") or actions >= 2:
         nxt = s.current_chamber + 1; s.current_chamber = nxt; s.last_chamber = None
         if nxt >= TOTAL_CHAMBERS:
-           s.door_anim = "vault"
-           append_log("SENTINEL", "All chambers have spoken. The forge awaits you now.")
+            s.door_anim = "vault"
+            append_log("SENTINEL", "All chambers have spoken. The forge awaits you now.")
         else:
-           s.door_anim = "chamber"
-           append_log("SYSTEM", f"Chamber {nxt+1} unlocked - the door opens.")
+            s.door_anim = "chamber"
+            append_log("SYSTEM", f"Chamber {nxt+1} unlocked - the door opens.")
     event = maybe_trigger_event()
     if event:
         s.last_event = event; change_trust(event["trust_delta"])
         append_log("SYSTEM", f"EVENT: {event['title']} - {event['description']}")
-    check_achievements()           
+    check_achievements()
+
+
 def forge_relic():
     s = st.session_state
     if not s.chamber_history:
-       st.toast("No chamber explored yet", icon="⚠️"); return
+        st.toast("No chamber explored yet", icon="⚠️"); return
     last_title = s.chamber_history[-1]
     relic = generate_relic(last_title, s.chamber_descriptions.get(last_title, f"Ancient memories of {last_title}."), 
-                           len(s.relic_inventory))   
-
-
-
-
-                    
-
-
-
-
-
-
-    )   
+                           len(s.relic_inventory))
+    with st.spinner(f"Forging {relic['name']}..."):
+        card = make_relic_card(relic, get_relic_image(relic["art_prompt"], relic.get("rarity","Rare")))
+    buf = io.BytesIO(); card.save(buf, format="PNG"); relic["card_bytes"] - buf.getvalue()
+    s.relic_inventory.append(relic); s.latest_clue - f"Relic materialized : {relic['name']}"
+    append_log("S Y S T E M", f"Relic forged: {relic['name']}.")
+    append_log("sentinel", f"i can feel it taking shape! {relic['name']}. Hold onto it. you'll need it soon.")
+    st.toast(f"💎 Relic Forged! {relic['name']} [{relic['rarity']}]", icon="💎💎")
+    check_achievements()
+def unlock_final_vault():
+    s = st.session_state
+    s.ending_text = generate_final_ending(s.player_name, [r["name"] for r in s.relic_inventory], s.chamber_history) 
+    s.final_unlocked = True
+    s.door_anim = "final"
+    s.latest_clue = "The final vault recognizes yourjourney."
+    append_log("SYSTEM", "Final Seal Lifted. Vault Access Granted/.")
+    check_achievements()   
